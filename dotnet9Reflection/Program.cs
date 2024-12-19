@@ -3,11 +3,6 @@ using System.Reflection.Emit;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
-using Microsoft.NET.HostModel.AppHost;
-using System.IO;
-using Microsoft.NET.HostModel.Bundle;
-using System.Runtime.Loader;
-
 
 namespace dotnet9Reflection
 {
@@ -43,7 +38,7 @@ namespace dotnet9Reflection
             PathAssemblyResolver resolver = new(Directory.GetFiles(referencePath, "*.dll"));
             using MetadataLoadContext context = new(resolver);
             Assembly coreAssembly = context.CoreAssembly!;
-            
+
             // typeを取得
             Type voidType = coreAssembly.GetType(typeof(void).FullName!)!;
             Type objectType = coreAssembly.GetType(typeof(object).FullName!)!;
@@ -52,10 +47,10 @@ namespace dotnet9Reflection
             Type consoleType = coreAssembly.GetType(typeof(Console).FullName!)!;
 
             // PersistedAssemblyBuilderを生成
-            PersistedAssemblyBuilder assemblyBuilder = new(new AssemblyName("HelloWorldTest"), coreAssembly);
+            PersistedAssemblyBuilder assemblyBuilder = new(new AssemblyName("EmitTest"), coreAssembly);
 
             // TypeBuilderの生成
-            TypeBuilder typeBuilder = assemblyBuilder.DefineDynamicModule("HelloWorldTest").DefineType("HelloWorldTest", TypeAttributes.Public | TypeAttributes.Class, objectType);
+            TypeBuilder typeBuilder = assemblyBuilder.DefineDynamicModule("EmitTest").DefineType("Program", TypeAttributes.Public | TypeAttributes.Class, objectType);
 
             // メソッドを生成
             MethodBuilder methodBuilder = typeBuilder.DefineMethod("Main", MethodAttributes.Public | MethodAttributes.Static, voidType, [stringArrayType]);
@@ -66,7 +61,7 @@ namespace dotnet9Reflection
             ilGenerator.Emit(OpCodes.Ret);
 
             
-            // HelloWorldTestの型を生成
+            // EmitTestの型を生成
             typeBuilder.CreateType();
 
             
@@ -74,7 +69,7 @@ namespace dotnet9Reflection
             MetadataBuilder metadataBuilder = assemblyBuilder.GenerateMetadata(out BlobBuilder ilStream, out BlobBuilder fieldData);
             // PEファイル(DLLファイル)のヘッダーを生成
             PEHeaderBuilder peHeaderBuilder = new(imageCharacteristics: Characteristics.ExecutableImage);
-
+            // CLR上で動くPEファイルの作成
             ManagedPEBuilder peBuilder = new(
                 header: peHeaderBuilder,
                 metadataRootBuilder: new MetadataRootBuilder(metadataBuilder),
@@ -82,40 +77,49 @@ namespace dotnet9Reflection
                 mappedFieldData: fieldData,
                 entryPoint: MetadataTokens.MethodDefinitionHandle(methodBuilder.MetadataToken));
             
-            // BlobBuilerへ変換
+            // PEデータからBlobBuilerへ変換
             BlobBuilder peBlob = new();
             peBuilder.Serialize(peBlob);
             
-            // blobからStreamに書き込み
-            using (FileStream fileStream = new(Path.Combine(basePath, "HelloWorldTest.dll"), FileMode.Create, FileAccess.Write))
+            // blobからStreamに書き込み(dllの書き込み)
+            using (FileStream fileStream = new(Path.Combine(basePath, "EmitTest.dll"), FileMode.Create, FileAccess.Write))
             {
                 peBlob.WriteContentTo(fileStream);
             }
 
 
             // HostWriter.CreateAppHostメソッドのMethodInfoを取得
-            var CreateAppHost = SearchHostWriterDelegate(sdkPath, 9, 0);
+            var CreateAppHost = SearchHostWriterMethodInfo(sdkPath, 9, 0);
 
+            // exeファイルの書き込み
             CreateAppHost.Invoke(null, new object[]{
                 @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
-                Path.Combine(basePath, "HelloWorldTest.exe"),
-                "HelloWorldTest.dll",false,null,false,false,null });
+                Path.Combine(basePath, "EmitTest.exe"),
+                "EmitTest.dll",false,null,false,false,null });
 
-            //HostWriter.CreateAppHost(
-            //    @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
-            //    Path.Combine(basePath, "HelloWorldTest.exe"),
-            //    "HelloWorldTest.dll",false);
-
-//            File.WriteAllText(Path.Combine(basePath,"HelloWorldTest.runtimeconfig.json"), @"{
-//  ""runtimeOptions"": {
-//    ""tfm"": ""net9.0"",
-//    ""framework"": {
-//      ""name"": ""Microsoft.NETCore.App"",
-//      ""version"": ""9.0.0""
-//    }
-//  }
-//}");
+            // runtimeconfig.jsonファイルを生成
+            File.WriteAllText(Path.Combine(basePath, "EmitTest.runtimeconfig.json"), @"{
+              ""runtimeOptions"": {
+                ""tfm"": ""net9.0"",
+                ""includedFrameworks"": [
+                  {
+                    ""name"": ""Microsoft.NETCore.App"",
+                    ""version"": ""9.0.0""
+                  }
+                ]
+              }
+            }");
         }
+
+        /// <summary>
+        /// サブフォルダの名前をVersionとみなし条件を満たす最新のversionの名前のフォルダを取得する
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="majorVersion"></param>
+        /// <param name="minorVersion"></param>
+        /// <param name="revisionVersion"></param>
+        /// <param name="buildVersion"></param>
+        /// <returns></returns>
         static string? GetVersionDirectory(string path, int majorVersion ,int minorVersion, int revisionVersion = -1,int buildVersion = -1)
         {
 
@@ -150,28 +154,40 @@ namespace dotnet9Reflection
             return null;
         }
 
-        static MethodInfo SearchHostWriterDelegate(string sdkPath,int majorVersion, int minorVersion, int revisionVersion = -1, int buildVersion = -1)
+        /// <summary>
+        /// Microsoft.NET.HostModel.dll内のHostWriterクラスのCreateAppHostのメソッドをMethodInfoとして取得
+        /// </summary>
+        /// <param name="sdkPath">sdkのあるパス</param>
+        /// <param name="majorVersion">majorVersion</param>
+        /// <param name="minorVersion">minorVersion</param>
+        /// <param name="revisionVersion">revisionVersion</param>
+        /// <param name="buildVersion">buildVersion</param>
+        /// <returns></returns>
+        static MethodInfo SearchHostWriterMethodInfo(string sdkPath,int majorVersion, int minorVersion, int revisionVersion = -1, int buildVersion = -1)
         {
             string hostModelPath = Path.Combine(GetVersionDirectory(sdkPath,majorVersion, minorVersion, revisionVersion, buildVersion)!, "Microsoft.NET.HostModel.dll");
             MethodInfo methodInfo = Assembly.LoadFile(hostModelPath).GetType("Microsoft.NET.HostModel.AppHost.HostWriter")!.GetMethod("CreateAppHost")!;
             return methodInfo;
         }
+
+        /// <summary>
+        /// dllをコピーするメソッド
+        /// </summary>
+        /// <param name="sourceDir">コピー元directory</param>
+        /// <param name="destinationDir">コピー元先</param>
+        /// <param name="recursive">サブフォルダを含めるか</param>
+        /// <exception cref="DirectoryNotFoundException"></exception>
         static void CopyDirectory(string sourceDir, string destinationDir, bool recursive)
         {
-            // Get information about the source directory
             var dir = new DirectoryInfo(sourceDir);
 
-            // Check if the source directory exists
             if (!dir.Exists)
                 throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
 
-            // Cache directories before we start copying
             DirectoryInfo[] dirs = dir.GetDirectories();
 
-            // Create the destination directory
             Directory.CreateDirectory(destinationDir);
 
-            // Get the files in the source directory and copy to the destination directory
             foreach (FileInfo file in dir.GetFiles())
             {
                 string targetFilePath = Path.Combine(destinationDir, file.Name);
@@ -182,13 +198,11 @@ namespace dotnet9Reflection
                 }
             }
 
-            // If recursive and copying subdirectories, recursively call this method
             if (recursive)
             {
                 foreach (DirectoryInfo subDir in dirs)
                 {
                     string newDestinationDir = Path.Combine(destinationDir, subDir.Name);
-                    Directory.CreateDirectory(newDestinationDir);
                     CopyDirectory(subDir.FullName, newDestinationDir, true);
                 }
             }
