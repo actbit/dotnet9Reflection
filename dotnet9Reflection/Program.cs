@@ -6,6 +6,7 @@ using System.Reflection.PortableExecutable;
 using Microsoft.NET.HostModel.AppHost;
 using System.IO;
 using Microsoft.NET.HostModel.Bundle;
+using System.Runtime.Loader;
 
 
 namespace dotnet9Reflection
@@ -15,38 +16,63 @@ namespace dotnet9Reflection
 
         static void Main(string[] args)
         {
-            string referencePath = @"C:\Program Files\dotnet\shared\Microsoft.NETCore.App\9.0.0";
-            var dotnet =Environment.GetEnvironmentVariable("DOTNET_ROOT");
-            Directory.CreateDirectory("output");
-            string basePath = Directory.GetCurrentDirectory();
-            basePath = Path.Combine(basePath, "output");
 
+            // 出力パスを作成
+            DirectoryInfo baseDirectory = Directory.CreateDirectory("output");
+
+            // ライブラリなどがあるディレクトリを取得
+            string referencePath = GetVersionDirectory(@"C:\Program Files\dotnet\shared\Microsoft.NETCore.App",9,0)!;
+            
+            // 保存先パスを取得
+            string basePath = baseDirectory.FullName;
+            
+            // sdkのパスを取得
+            string sdkPath = @"C:\Program Files\dotnet\sdk";
+
+            // dllをコピー
             CopyDirectory(referencePath, basePath, true);
-            CopyDirectory("C:\\Program Files\\dotnet\\host\\fxr\\9.0.0", basePath, true);
 
+            // hostfxrをコピー
+            string fxrDirPath = GetVersionDirectory(@"C:\Program Files\dotnet\host\fxr", 9, 0)!;
+            CopyDirectory(fxrDirPath, basePath, true);
+
+            // dllなどをコピーしたのでコピー先のdllを参照するように指定する
             referencePath = basePath;
+
+            // dllを読み込み
             PathAssemblyResolver resolver = new(Directory.GetFiles(referencePath, "*.dll"));
             using MetadataLoadContext context = new(resolver);
             Assembly coreAssembly = context.CoreAssembly!;
+            
+            // typeを取得
             Type voidType = coreAssembly.GetType(typeof(void).FullName!)!;
             Type objectType = coreAssembly.GetType(typeof(object).FullName!)!;
             Type stringType = coreAssembly.GetType(typeof(string).FullName!)!;
             Type stringArrayType = coreAssembly.GetType(typeof(string[]).FullName!)!;
             Type consoleType = coreAssembly.GetType(typeof(Console).FullName!)!;
 
+            // PersistedAssemblyBuilderを生成
             PersistedAssemblyBuilder assemblyBuilder = new(new AssemblyName("HelloWorldTest"), coreAssembly);
 
+            // TypeBuilderの生成
             TypeBuilder typeBuilder = assemblyBuilder.DefineDynamicModule("HelloWorldTest").DefineType("HelloWorldTest", TypeAttributes.Public | TypeAttributes.Class, objectType);
 
+            // メソッドを生成
             MethodBuilder methodBuilder = typeBuilder.DefineMethod("Main", MethodAttributes.Public | MethodAttributes.Static, voidType, [stringArrayType]);
+            //メソッド内部を生成
             ILGenerator ilGenerator = methodBuilder.GetILGenerator();
             ilGenerator.Emit(OpCodes.Ldstr, "Hello, World!");
             ilGenerator.Emit(OpCodes.Call, consoleType.GetMethod("WriteLine", [stringType])!);
             ilGenerator.Emit(OpCodes.Ret);
 
+            
+            // HelloWorldTestの型を生成
             typeBuilder.CreateType();
 
+            
+            // PersistedAssemblyBuilderからMetadataBuilderを生成
             MetadataBuilder metadataBuilder = assemblyBuilder.GenerateMetadata(out BlobBuilder ilStream, out BlobBuilder fieldData);
+            // PEファイル(DLLファイル)のヘッダーを生成
             PEHeaderBuilder peHeaderBuilder = new(imageCharacteristics: Characteristics.ExecutableImage);
 
             ManagedPEBuilder peBuilder = new(
@@ -55,19 +81,30 @@ namespace dotnet9Reflection
                 ilStream: ilStream,
                 mappedFieldData: fieldData,
                 entryPoint: MetadataTokens.MethodDefinitionHandle(methodBuilder.MetadataToken));
-
+            
+            // BlobBuilerへ変換
             BlobBuilder peBlob = new();
             peBuilder.Serialize(peBlob);
-
+            
+            // blobからStreamに書き込み
             using (FileStream fileStream = new(Path.Combine(basePath, "HelloWorldTest.dll"), FileMode.Create, FileAccess.Write))
             {
                 peBlob.WriteContentTo(fileStream);
             }
 
-            HostWriter.CreateAppHost(
+
+            // HostWriter.CreateAppHostメソッドのMethodInfoを取得
+            var CreateAppHost = SearchHostWriterDelegate(sdkPath, 9, 0);
+
+            CreateAppHost.Invoke(null, new object[]{
                 @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
                 Path.Combine(basePath, "HelloWorldTest.exe"),
-                "HelloWorldTest.dll",false);
+                "HelloWorldTest.dll",false,null,false,false,null });
+
+            //HostWriter.CreateAppHost(
+            //    @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
+            //    Path.Combine(basePath, "HelloWorldTest.exe"),
+            //    "HelloWorldTest.dll",false);
 
 //            File.WriteAllText(Path.Combine(basePath,"HelloWorldTest.runtimeconfig.json"), @"{
 //  ""runtimeOptions"": {
@@ -113,10 +150,11 @@ namespace dotnet9Reflection
             return null;
         }
 
-        static Action<string, string, string,bool> SearchHostWriterDelegate(int majorVersion, int minorVersion, int revisionVersion = -1, int buildVersion = -1)
+        static MethodInfo SearchHostWriterDelegate(string sdkPath,int majorVersion, int minorVersion, int revisionVersion = -1, int buildVersion = -1)
         {
-            string hostModelPath = @"C:\Program Files\dotnet\\sdk\";
-            return null;
+            string hostModelPath = Path.Combine(GetVersionDirectory(sdkPath,majorVersion, minorVersion, revisionVersion, buildVersion)!, "Microsoft.NET.HostModel.dll");
+            MethodInfo methodInfo = Assembly.LoadFile(hostModelPath).GetType("Microsoft.NET.HostModel.AppHost.HostWriter")!.GetMethod("CreateAppHost")!;
+            return methodInfo;
         }
         static void CopyDirectory(string sourceDir, string destinationDir, bool recursive)
         {
