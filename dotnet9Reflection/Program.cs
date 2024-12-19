@@ -91,9 +91,13 @@ namespace dotnet9Reflection
             // HostWriter.CreateAppHostメソッドのMethodInfoを取得
             var CreateAppHost = SearchHostWriterMethodInfo(sdkPath, 9, 0);
 
+            // ベースとなるapphostのパスを取得
+            string packPath = @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64";
+            string apphostPath = Path.Combine(GetVersionDirectory(packPath, 9, 0)!, "runtimes", "win-x64", "native", "apphost.exe");
+
             // exeファイルの書き込み
             CreateAppHost.Invoke(null, new object[]{
-                @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
+                apphostPath,
                 Path.Combine(basePath, "EmitTest.exe"),
                 "EmitTest.dll",false,null,false,false,null });
 
