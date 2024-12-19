@@ -4,6 +4,8 @@ using System.Reflection.Metadata.Ecma335;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using Microsoft.NET.HostModel.AppHost;
+using System.IO;
+using Microsoft.NET.HostModel.Bundle;
 
 
 namespace dotnet9Reflection
@@ -14,6 +16,7 @@ namespace dotnet9Reflection
         static void Main(string[] args)
         {
             string referencePath = @"C:\Program Files\dotnet\shared\Microsoft.NETCore.App\9.0.0";
+
             Directory.CreateDirectory("output");
             string basePath = Directory.GetCurrentDirectory();
             basePath = Path.Combine(basePath, "output");
@@ -60,8 +63,8 @@ namespace dotnet9Reflection
             {
                 peBlob.WriteContentTo(fileStream);
             }
-
-            
+            Binary
+            Bundler bundler = new Bundler(,)
             HostWriter.CreateAppHost(
                 @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
                 Path.Combine(basePath, "HelloWorldTest.exe"),
@@ -77,6 +80,41 @@ namespace dotnet9Reflection
 //  }
 //}");
         }
+        static string? GetVersionDirectory(string path, int majorVersion ,int minorVersion, int revisionVersion = -1,int buildVersion = -1)
+        {
+
+            DirectoryInfo directoryInfo = new DirectoryInfo(path);
+            DirectoryInfo[] directories = directoryInfo.GetDirectories();
+            foreach(DirectoryInfo directory in directories.OrderByDescending(x => new Version(x.Name)))
+            {
+                Version version = new Version(directory.Name);
+                if(version.Major != majorVersion)
+                {
+                    continue;
+                }
+
+                if(version.Minor != minorVersion)
+                {
+                    continue ;
+                }
+
+                if(version.Revision != revisionVersion && revisionVersion != -1)
+                {
+                    continue;
+                }
+
+                if(version.Build !=buildVersion && buildVersion != -1)
+                {
+                    continue;
+                }
+
+                return directory.FullName;
+            }
+
+            return null;
+        }
+
+        static Action<string, string, string,bool> GetAppHostDelegate()
         static void CopyDirectory(string sourceDir, string destinationDir, bool recursive)
         {
             // Get information about the source directory
@@ -109,6 +147,7 @@ namespace dotnet9Reflection
                 foreach (DirectoryInfo subDir in dirs)
                 {
                     string newDestinationDir = Path.Combine(destinationDir, subDir.Name);
+                    Directory.CreateDirectory(newDestinationDir);
                     CopyDirectory(subDir.FullName, newDestinationDir, true);
                 }
             }
