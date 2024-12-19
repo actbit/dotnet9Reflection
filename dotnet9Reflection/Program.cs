@@ -16,7 +16,7 @@ namespace dotnet9Reflection
         static void Main(string[] args)
         {
             string referencePath = @"C:\Program Files\dotnet\shared\Microsoft.NETCore.App\9.0.0";
-
+            var dotnet =Environment.GetEnvironmentVariable("DOTNET_ROOT");
             Directory.CreateDirectory("output");
             string basePath = Directory.GetCurrentDirectory();
             basePath = Path.Combine(basePath, "output");
@@ -63,8 +63,7 @@ namespace dotnet9Reflection
             {
                 peBlob.WriteContentTo(fileStream);
             }
-            Binary
-            Bundler bundler = new Bundler(,)
+
             HostWriter.CreateAppHost(
                 @"C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\9.0.0\runtimes\win-x64\native\apphost.exe",
                 Path.Combine(basePath, "HelloWorldTest.exe"),
@@ -114,7 +113,11 @@ namespace dotnet9Reflection
             return null;
         }
 
-        static Action<string, string, string,bool> GetAppHostDelegate()
+        static Action<string, string, string,bool> SearchHostWriterDelegate(int majorVersion, int minorVersion, int revisionVersion = -1, int buildVersion = -1)
+        {
+            string hostModelPath = @"C:\Program Files\dotnet\\sdk\";
+            return null;
+        }
         static void CopyDirectory(string sourceDir, string destinationDir, bool recursive)
         {
             // Get information about the source directory
